@@ -8,20 +8,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ===================== CODE =====================
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ===================== JDK 25 =====================
+      # ===================== JAVA 25 =====================
       - name: Install JDK 25
         run: |
           sudo apt update
           sudo apt install -y wget gnupg
 
-          wget -O- https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb -O jdk25.deb
+          wget -O jdk25.deb https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb
           sudo apt install -y ./jdk25.deb
           rm jdk25.deb
 
-      # ===================== NGROK =====================
+      # ===================== NGROK INSTALL =====================
       - name: Install ngrok
         run: |
           curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
@@ -33,12 +34,12 @@ jobs:
           sudo apt update
           sudo apt install -y ngrok
 
-      # ===================== CONFIG NGROK =====================
-      - name: Setup ngrok auth
+      # ===================== NGROK AUTH =====================
+      - name: Configure ngrok
         run: ngrok config add-authtoken ${{ secrets.NGROK_TOKEN }}
 
       # ===================== EULA =====================
-      - name: Accept EULA
+      - name: Accept Minecraft EULA
         run: echo "eula=true" > eula.txt
 
       # ===================== START NGROK =====================
@@ -46,9 +47,16 @@ jobs:
         run: |
           nohup ngrok tcp 25565 > ngrok.log 2>&1 &
           sleep 5
+
+          echo "=== NGROK URL ==="
           curl -s http://127.0.0.1:4040/api/tunnels || true
 
-      # ===================== START SERVER =====================
-      - name: Run PaperMC server
+      # ===================== RUN SERVER =====================
+      - name: Run PaperMC Server
         run: |
+          export JAVA_HOME=/usr/lib/jvm/jdk-25.0.3-oracle-x64
+          export PATH=$JAVA_HOME/bin:$PATH
+
+          java -version
+
           java -Xms2G -Xmx4G -jar paper.jar --nogui
