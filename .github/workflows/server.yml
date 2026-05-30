@@ -8,21 +8,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       # ===================== CHECKOUT =====================
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ===================== SYSTEM INFO LOGGING =====================
-      - name: System Debug Info (FULL OUTPUT)
+      # ===================== FULL SYSTEM LOG =====================
+      - name: System Debug (FULL OUTPUT)
         run: |
           echo "================ SYSTEM INFO ================"
           uname -a
-          lsb_release -a || true
+          free -h
           df -h
-          free -m
           echo "============================================="
 
-      # ===================== JAVA INSTALL =====================
+      # ===================== JAVA =====================
       - name: Install Java
         run: |
           sudo apt update
@@ -48,37 +48,33 @@ jobs:
           sudo apt update
           sudo apt install -y playit
 
-          echo "================ PLAYIT VERSION ================"
-          playit --version || true
-          echo "==============================================="
+          echo "PLAYIT INSTALLED OK"
 
-      # ===================== START PLAYIT (FULL LOG DUMP) =====================
-      - name: Start Playit (FULL DEBUG MODE)
+      # ===================== START PLAYIT (REAL SYSTEMD LOGGING) =====================
+      - name: Start Playit + Capture ALL Logs
         run: |
-          echo "================ PLAYIT START ================"
+          echo "================ STARTING PLAYIT ================"
 
-          # systemd already installed service → use it properly
           sudo systemctl enable playit || true
-          sudo systemctl restart playit || true
+          sudo systemctl restart playit
 
           sleep 5
 
-          echo "PLAYIT SERVICE STATUS:"
           systemctl status playit --no-pager || true
 
-          echo "REALTIME LOG STREAM:"
-          sudo journalctl -u playit -f --no-pager > playit.log 2>&1 &
+          # FULL LIVE LOG MIRROR
+          sudo journalctl -fu playit --no-pager > playit.log 2>&1 &
           LOGPID=$!
 
-          echo "Waiting for tunnel output..."
+          echo "Watching Playit logs..."
 
-          for i in $(seq 1 120); do
-            echo "[check $i] scanning logs..."
+          for i in $(seq 1 150); do
+            echo "[check $i] scanning..."
 
             # tunnel address
             ADDR=$(grep -oE '[a-zA-Z0-9.-]+\.playit\.gg:[0-9]+' playit.log | tail -n 1 || true)
 
-            # claim (only first-time setups)
+            # claim link (only first-time setup)
             CLAIM=$(grep -oE 'https://playit.gg/claim/[a-zA-Z0-9\-]+' playit.log | tail -n 1 || true)
 
             if [ ! -z "$ADDR" ]; then
@@ -99,15 +95,10 @@ jobs:
             sleep 2
           done
 
-          echo "================ FULL PLAYIT LOG ================"
+          echo "================ FULL PLAYIT LOG DUMP ================"
           cat playit.log || true
-          echo "================================================="
 
           kill $LOGPID || true
-
-      # ===================== EULA =====================
-      - name: Accept EULA
-        run: echo "eula=true" > eula.txt
 
       # ===================== DOWNLOAD PAPER =====================
       - name: Download PaperMC
@@ -118,9 +109,13 @@ jobs:
 
           ls -lah
 
-      # ===================== RUN SERVER =====================
-      - name: Run Minecraft Server (FULL OUTPUT)
-        run: |
-          echo "================ STARTING SERVER ================"
+      # ===================== ACCEPT EULA =====================
+      - name: Accept EULA
+        run: echo "eula=true" > eula.txt
 
-          java -Xms2G -Xmx4G -jar paper.jar --nogui
+      # ===================== RUN SERVER (FULL CONSOLE MIRROR) =====================
+      - name: Run Minecraft Server
+        run: |
+          echo "================ MINECRAFT STARTING ================"
+
+          java -Xms2G -Xmx4G -jar paper.jar --nogui 2>&1 | tee mc.log
