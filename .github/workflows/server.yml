@@ -13,27 +13,16 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ===================== FULL SYSTEM LOG =====================
-      - name: System Debug (FULL OUTPUT)
-        run: |
-          echo "================ SYSTEM INFO ================"
-          uname -a
-          free -h
-          df -h
-          echo "============================================="
-
       # ===================== JAVA =====================
       - name: Install Java
         run: |
           sudo apt update
           sudo apt install -y openjdk-21-jre
 
-          echo "================ JAVA VERSION ================"
           java -version
-          echo "============================================="
 
       # ===================== PLAYIT INSTALL =====================
-      - name: Install Playit.gg
+      - name: Install Playit
         run: |
           sudo apt update
           sudo apt install -y curl gnupg
@@ -48,34 +37,24 @@ jobs:
           sudo apt update
           sudo apt install -y playit
 
-          echo "PLAYIT INSTALLED OK"
-
-      # ===================== START PLAYIT (REAL SYSTEMD LOGGING) =====================
-      - name: Start Playit + Capture ALL Logs
+      # ===================== START PLAYIT (FIXED + RELIABLE) =====================
+      - name: Start Playit Tunnel
         run: |
-          echo "================ STARTING PLAYIT ================"
+          echo "Starting Playit..."
 
-          sudo systemctl enable playit || true
           sudo systemctl restart playit
+          sleep 10
 
-          sleep 5
-
+          echo "PLAYIT STATUS:"
           systemctl status playit --no-pager || true
 
-          # FULL LIVE LOG MIRROR
-          sudo journalctl -fu playit --no-pager > playit.log 2>&1 &
-          LOGPID=$!
+          echo "WAITING FOR TUNNEL..."
 
-          echo "Watching Playit logs..."
-
-          for i in $(seq 1 150); do
+          for i in $(seq 1 180); do
             echo "[check $i] scanning..."
 
-            # tunnel address
-            ADDR=$(grep -oE '[a-zA-Z0-9.-]+\.playit\.gg:[0-9]+' playit.log | tail -n 1 || true)
-
-            # claim link (only first-time setup)
-            CLAIM=$(grep -oE 'https://playit.gg/claim/[a-zA-Z0-9\-]+' playit.log | tail -n 1 || true)
+            # ONLY real tunnel output from journal
+            ADDR=$(sudo journalctl -u playit --no-pager | grep -oE '[a-zA-Z0-9.-]+\.playit\.gg:[0-9]+' | tail -n 1 || true)
 
             if [ ! -z "$ADDR" ]; then
               echo ""
@@ -85,37 +64,22 @@ jobs:
               break
             fi
 
-            if [ ! -z "$CLAIM" ]; then
-              echo ""
-              echo "================ CLAIM LINK ================"
-              echo "$CLAIM"
-              echo "==========================================="
-            fi
-
             sleep 2
           done
 
-          echo "================ FULL PLAYIT LOG DUMP ================"
-          cat playit.log || true
-
-          kill $LOGPID || true
-
-      # ===================== DOWNLOAD PAPER =====================
-      - name: Download PaperMC
-        run: |
-          echo "Downloading PaperMC..."
-
-          curl -L -o paper.jar https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/latest/downloads/paper-1.21.4-latest.jar
-
-          ls -lah
-
-      # ===================== ACCEPT EULA =====================
+      # ===================== EULA =====================
       - name: Accept EULA
         run: echo "eula=true" > eula.txt
 
-      # ===================== RUN SERVER (FULL CONSOLE MIRROR) =====================
+      # ===================== RUN SERVER (YOUR PREINSTALLED JAR) =====================
       - name: Run Minecraft Server
         run: |
-          echo "================ MINECRAFT STARTING ================"
+          echo "Starting Minecraft Server..."
 
-          java -Xms2G -Xmx4G -jar paper.jar --nogui 2>&1 | tee mc.log
+          if [ ! -f paper.jar ]; then
+            echo "paper.jar not found in repo"
+            ls -lah
+            exit 1
+          fi
+
+          java -Xms2G -Xmx4G -jar paper.jar --nogui
