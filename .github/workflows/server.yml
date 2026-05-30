@@ -8,21 +8,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ===================== REPO =====================
+      # ===================== CHECKOUT =====================
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ===================== JAVA 25 =====================
+      # ===================== INSTALL JAVA 25 =====================
       - name: Install JDK 25
         run: |
           sudo apt update
-          sudo apt install -y wget gnupg curl
+          sudo apt install -y wget gnupg curl procps
 
+          echo "Downloading JDK 25..."
           wget -O jdk25.deb https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb
+
           sudo apt install -y ./jdk25.deb
           rm jdk25.deb
 
-      # ===================== NGROK =====================
+          java -version
+
+      # ===================== INSTALL NGROK =====================
       - name: Install ngrok
         run: |
           curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
@@ -34,38 +38,60 @@ jobs:
           sudo apt update
           sudo apt install -y ngrok
 
-      # ===================== AUTH =====================
+      # ===================== CONFIG NGROK =====================
       - name: Configure ngrok
         run: ngrok config add-authtoken ${{ secrets.NGROK_TOKEN }}
 
-      # ===================== EULA =====================
+      # ===================== MINECRAFT EULA =====================
       - name: Accept EULA
         run: echo "eula=true" > eula.txt
 
-      # ===================== NGROK START + WAIT =====================
-      - name: Start ngrok tunnel and get URL
+      # ===================== NGROK AUTO-RETRY + DEBUG =====================
+      - name: Start ngrok tunnel (RETRY + DEBUG)
         run: |
-          nohup ngrok tcp 25565 > ngrok.log 2>&1 &
+          echo "================ NGROK AUTO START ================"
 
-          echo "Waiting for ngrok to generate public URL..."
+          ATTEMPT=0
 
           while true; do
-            URL=$(curl -s http://127.0.0.1:4040/api/tunnels \
-              | grep -o '"public_url":"[^"]*' \
-              | head -n 1 \
-              | cut -d'"' -f4 || true)
+            ATTEMPT=$((ATTEMPT+1))
 
-            if [ ! -z "$URL" ]; then
-              echo "================ NGROK LINK ================"
-              echo "$URL"
-              echo "==========================================="
-              break
-            fi
+            echo ""
+            echo ">>> Attempt $ATTEMPT starting ngrok..."
 
-            sleep 2
+            pkill ngrok || true
+            nohup ngrok tcp 25565 > ngrok.log 2>&1 &
+
+            for i in $(seq 1 15); do
+              echo "[attempt $ATTEMPT | second $i] checking ngrok..."
+
+              RAW=$(curl -s http://127.0.0.1:4040/api/tunnels || true)
+              echo "[debug raw] $RAW"
+
+              URL=$(echo "$RAW" \
+                | grep -o '"public_url":"[^"]*' \
+                | head -n 1 \
+                | cut -d'"' -f4 || true)
+
+              if [ ! -z "$URL" ]; then
+                echo ""
+                echo "================ NGROK READY ================"
+                echo "SERVER ADDRESS: $URL"
+                echo "============================================="
+                break 2
+              fi
+
+              sleep 1
+            done
+
+            echo ">>> Attempt $ATTEMPT failed, retrying in 15s..."
+            echo "Last logs:"
+            tail -n 20 ngrok.log || true
+
+            sleep 15
           done
 
-      # ===================== SERVER =====================
+      # ===================== RUN PAPER =====================
       - name: Run PaperMC Server
         run: |
           export JAVA_HOME=/usr/lib/jvm/jdk-25.0.3-oracle-x64
