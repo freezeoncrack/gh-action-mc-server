@@ -12,91 +12,79 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ===================== INSTALL JAVA 25 =====================
-      - name: Install JDK 25
+      # ===================== JAVA =====================
+      - name: Install Java
         run: |
           sudo apt update
           sudo apt install -y wget gnupg curl procps
 
-          echo "Downloading JDK 25..."
-          wget -O jdk25.deb https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb
-
-          sudo apt install -y ./jdk25.deb
-          rm jdk25.deb
+          echo "Installing Java..."
+          sudo apt install -y openjdk-21-jre
 
           java -version
 
-      # ===================== INSTALL NGROK =====================
-      - name: Install ngrok
+      # ===================== PLAYIT INSTALL =====================
+      - name: Install Playit.gg
         run: |
-          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          sudo apt update
+          sudo apt install -y curl gnupg
 
-          echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main" \
-            | sudo tee /etc/apt/sources.list.d/ngrok.list >/dev/null
+          curl -SsL https://playit-cloud.github.io/ppa/key.gpg \
+            | gpg --dearmor \
+            | sudo tee /etc/apt/trusted.gpg.d/playit.gpg >/dev/null
+
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/playit.gpg] https://playit-cloud.github.io/ppa/data ./" \
+            | sudo tee /etc/apt/sources.list.d/playit-cloud.list
 
           sudo apt update
-          sudo apt install -y ngrok
+          sudo apt install -y playit
 
-      # ===================== CONFIG NGROK =====================
-      - name: Configure ngrok
-        run: ngrok config add-authtoken ${{ secrets.NGROK_TOKEN }}
+      # ===================== START PLAYIT (AUTO SETUP) =====================
+      - name: Start Playit Agent
+        run: |
+          echo "Starting Playit setup..."
 
-      # ===================== MINECRAFT EULA =====================
+          nohup playit setup > playit.log 2>&1 &
+
+          sleep 10
+
+          echo "Waiting for tunnel / claim URL..."
+
+          for i in $(seq 1 80); do
+            echo "[check $i] scanning logs..."
+
+            CLAIM=$(grep -oE 'https://playit.gg/claim/[a-zA-Z0-9\-]+' playit.log | head -n 1 || true)
+            ADDR=$(grep -oE '[a-zA-Z0-9.-]+\.playit\.gg:[0-9]+' playit.log | head -n 1 || true)
+
+            if [ ! -z "$ADDR" ]; then
+              echo ""
+              echo "================ PLAYIT READY ================"
+              echo "SERVER ADDRESS: $ADDR"
+              echo "=============================================="
+              break
+            fi
+
+            if [ ! -z "$CLAIM" ]; then
+              echo "CLAIM URL:"
+              echo "$CLAIM"
+              echo "Open it once in browser to link agent."
+            fi
+
+            sleep 2
+          done
+
+          tail -n 50 playit.log || true
+
+      # ===================== EULA =====================
       - name: Accept EULA
         run: echo "eula=true" > eula.txt
 
-      # ===================== NGROK AUTO-RETRY + DEBUG =====================
-      - name: Start ngrok tunnel (RETRY + DEBUG)
+      # ===================== DOWNLOAD PAPER =====================
+      - name: Download PaperMC
         run: |
-          echo "================ NGROK AUTO START ================"
+          curl -L -o paper.jar https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/latest/downloads/paper-1.21.4-latest.jar
 
-          ATTEMPT=0
-
-          while true; do
-            ATTEMPT=$((ATTEMPT+1))
-
-            echo ""
-            echo ">>> Attempt $ATTEMPT starting ngrok..."
-
-            pkill ngrok || true
-            nohup ngrok tcp 25565 > ngrok.log 2>&1 &
-
-            for i in $(seq 1 15); do
-              echo "[attempt $ATTEMPT | second $i] checking ngrok..."
-
-              RAW=$(curl -s http://127.0.0.1:4040/api/tunnels || true)
-              echo "[debug raw] $RAW"
-
-              URL=$(echo "$RAW" \
-                | grep -o '"public_url":"[^"]*' \
-                | head -n 1 \
-                | cut -d'"' -f4 || true)
-
-              if [ ! -z "$URL" ]; then
-                echo ""
-                echo "================ NGROK READY ================"
-                echo "SERVER ADDRESS: $URL"
-                echo "============================================="
-                break 2
-              fi
-
-              sleep 1
-            done
-
-            echo ">>> Attempt $ATTEMPT failed, retrying in 15s..."
-            echo "Last logs:"
-            tail -n 20 ngrok.log || true
-
-            sleep 15
-          done
-
-      # ===================== RUN PAPER =====================
-      - name: Run PaperMC Server
+      # ===================== RUN SERVER =====================
+      - name: Run Minecraft Server
         run: |
-          export JAVA_HOME=/usr/lib/jvm/jdk-25.0.3-oracle-x64
-          export PATH=$JAVA_HOME/bin:$PATH
-
-          java -version
-
           java -Xms2G -Xmx4G -jar paper.jar --nogui
